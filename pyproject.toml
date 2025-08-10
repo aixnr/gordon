@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gordon"
+version = "0.1.0"
+description = "Minimal RAG to chat with papers"
+readme = "README.md"
+requires-python = ">=3.9"
+authors = [{ name = "Aizan Fahri" }]
+license = { text = "MIT" }
+dependencies = [
+    "langchain>=0.2.0",
+    "langchain-community>=0.2.0",
+    "langchain-openai>=0.1.0",
+    "faiss-cpu>=1.8.0",
+    "pypdf>=4.0.0",
+    "langgraph",
+    "rich",
+    "beautifulsoup4",
+]
+
+# Tell setuptools to find packages under src/
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# Define CLI scripts pointing to main functions in modules
+[project.scripts]
+ingest-web = "gordon.ingest_web:main"
+ingest-doc = "gordon.ingest_doc:main"
+query = "gordon.query:main"
