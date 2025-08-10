@@ -1,3 +1,7 @@
+documents/
+__pycache__/
+.ropeproject/
+faiss_index/
 venv/
 build/
 src/gordon.egg-info/

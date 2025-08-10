@@ -3,16 +3,15 @@ import asyncio
 import json
 import os
 import sys
-from typing import List, Dict, Any
-
+from typing import List, Dict, Any, Set, Optional, Tuple
 import aiohttp
+import urllib
 from bs4 import BeautifulSoup
-
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain.docstore.document import Document
-
 from .loadmodel import embeddings
+from urllib.parse import urljoin, urldefrag
 
 def load_sources(json_path: str) -> List[Dict[str, Any]]:
     """
@@ -23,33 +22,30 @@ def load_sources(json_path: str) -> List[Dict[str, Any]]:
         sources = json.load(f)
     if not isinstance(sources, list):
         raise ValueError("JSON root must be a list of objects")
-
     normalized_sources = []
     for source in sources:
         urls = source.get("url")
         if urls is None:
             print("[!] Warning: source missing 'url' field, skipping:", source)
             continue
-
         if isinstance(urls, str):
             urls = [urls]
         elif not isinstance(urls, list):
             print("[!] Warning: 'url' must be string or list, skipping:", source)
             continue
-
         for url in urls:
             entry = dict(source)
             entry["url"] = url
             normalized_sources.append(entry)
-
     return normalized_sources
 
 
 async def fetch_page(session: aiohttp.ClientSession, url: str, timeout: int = 15) -> str:
     headers = {
-        "User-Agent": "ingest-web/1.0 (+https://yourdomain.example)"
+        "User-Agent": "ingest-web/0.1.0 (+https://github.com/aixnr/gordon)"
     }
-    async with session.get(url, headers=headers, timeout=timeout) as resp:
+    client_timeout = aiohttp.ClientTimeout(total=timeout)
+    async with session.get(url, headers=headers, timeout=client_timeout) as resp:
         resp.raise_for_status()
         return await resp.text()
 
@@ -61,30 +57,25 @@ def parse_extract(html: str, src: Dict[str, Any]) -> List[Dict[str, str]]:
     """
     soup = BeautifulSoup(html, "html.parser")
     items: List[Dict[str, str]] = []
-
     tags = src.get("tags") or []
     selectors = src.get("selectors") or []
-
     # By tag name
     for tag in tags:
         for el in soup.find_all(tag):
             text = el.get_text(separator=" ", strip=True)
             if text:
                 items.append({"text": text, "method": "tag", "pattern": tag})
-
     # By CSS selector
     for sel in selectors:
         for el in soup.select(sel):
             text = el.get_text(separator=" ", strip=True)
             if text:
                 items.append({"text": text, "method": "selector", "pattern": sel})
-
     # Fallback to body if nothing found
     if not items:
         body = soup.body.get_text(separator=" ", strip=True) if soup.body else soup.get_text(separator=" ", strip=True)
         if body:
             items.append({"text": body, "method": "fallback", "pattern": "body"})
-
     return items
 
 
@@ -130,23 +121,110 @@ async def scrape_one(session: aiohttp.ClientSession, src: Dict[str, Any], semaph
     return docs
 
 
+def extract_links(base_url: str, html: str) -> Set[str]:
+    """
+    Extract and normalize all href links found in html relative to base_url.
+    Excludes links ending with common media file extensions and JS/CSS files.
+    """
+    MEDIA_EXTENSIONS = (
+        '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.svg', '.webp',
+        '.mp4', '.mp3', '.avi', '.mov', '.wmv', '.flv', '.mkv',
+        '.pdf', '.zip', '.rar', '.tar', '.gz',
+        '.css', '.js'
+    )
+
+    soup = BeautifulSoup(html, "html.parser")
+    links = set()
+    for a in soup.find_all("a", href=True):
+        href = a["href"]
+        abs_url = urljoin(base_url, href)
+        abs_url, _ = urldefrag(abs_url)  # Remove fragment
+
+        path_lower = urllib.parse.urlparse(abs_url).path.lower()
+        if any(path_lower.endswith(ext) for ext in MEDIA_EXTENSIONS):
+            continue
+
+        links.add(abs_url)
+    return links
+
+
+async def crawl_and_scrape(session: aiohttp.ClientSession, initial_src: Dict[str, Any],
+                           semaphore: asyncio.Semaphore, pause: float,
+                           loop: asyncio.AbstractEventLoop, max_depth: Optional[int] = None,
+                           timeout: int = 15) -> List[Document]:
+    """
+    Crawl starting from initial_src['url'] up to max_depth links deep.
+    Collect Documents from all pages found.
+
+    This crawler follows all links (not restricted to same domain).
+    """
+    if max_depth is None:
+        max_depth = int(os.getenv("GORDON_CRAWL_DEPTH", "0"))
+
+    visited: Set[str] = set()
+    to_visit: List[Tuple[str, Dict[str, Any], int]] = []
+    docs: List[Document] = []
+
+    url = initial_src.get("url")
+    if not url:
+        print("[!] Initial source has no url, exiting crawl.")
+        return docs
+
+    to_visit.append((url, initial_src, 0))
+
+    while to_visit:
+        current_url, current_src, depth = to_visit.pop(0)
+        if current_url in visited:
+            continue
+        visited.add(current_url)
+
+        # Prepare src for current URL with the same tags and selectors from current_src
+        src = dict(current_src)
+        src["url"] = current_url
+
+        page_docs = await scrape_one(session, src, semaphore, pause, loop)
+        docs.extend(page_docs)
+
+        if depth >= max_depth:
+            continue
+
+        # Fetch the page to extract links for the next crawl depth
+        try:
+            html = await fetch_page(session, current_url, timeout=timeout)
+        except Exception as e:
+            print(f"[!] Failed to fetch page for links {current_url}: {e}")
+            continue
+
+        links = extract_links(current_url, html)
+
+        for link in links:
+            if link not in visited:
+                to_visit.append((link, current_src, depth + 1))
+
+    return docs
+
+
 async def scrape_sources_async(sources: List[Dict[str, Any]], concurrency: int = 5,
                                pause: float = 0.0, timeout: int = 15) -> List[Document]:
     """
-    Scrape all sources concurrently (bounded by concurrency). Returns a list of Documents.
+    Scrape multiple sources concurrently with link crawling according to GORDON_CRAWL_DEPTH env var.
+    Each source will be crawled (if depth > 0) or scraped alone (depth=0).
     """
     connector = aiohttp.TCPConnector(limit_per_host=concurrency)
-    timeout_obj = aiohttp.ClientTimeout(total=None)  # per-request timeout handled in fetch_page
+    timeout_obj = aiohttp.ClientTimeout(total=None)  # timeout handled in fetch_page
     headers = {"User-Agent": "ingest-web/1.0 (+https://github.com/aixnr)"}
     semaphore = asyncio.Semaphore(concurrency)
     docs: List[Document] = []
     loop = asyncio.get_event_loop()
 
+    max_depth = int(os.getenv("GORDON_CRAWL_DEPTH", "0"))
     async with aiohttp.ClientSession(connector=connector, timeout=timeout_obj, headers=headers) as session:
-        tasks = [
-            asyncio.create_task(scrape_one(session, src, semaphore, pause, loop))
-            for src in sources
-        ]
+        tasks = []
+        for src in sources:
+            # For each source, create a crawl_and_scrape task
+            tasks.append(asyncio.create_task(
+                crawl_and_scrape(session, src, semaphore, pause, loop, max_depth=max_depth, timeout=timeout)
+            ))
         for task in asyncio.as_completed(tasks):
             try:
                 res = await task
@@ -181,7 +259,9 @@ def main():
         print("[!] Failed to load JSON:", e)
         sys.exit(1)
 
-    print(f"[*] Scraping {len(sources)} web sources with concurrency={args.concurrency} ...")
+    print(f"[*] Scraping {len(sources)} web sources with concurrency={args.concurrency} and "
+          f"crawl depth={os.getenv('GORDON_CRAWL_DEPTH', '0')} ...")
+
     try:
         raw_docs = asyncio.run(scrape_sources_async(sources, concurrency=args.concurrency,
                                                     pause=args.pause, timeout=args.timeout))

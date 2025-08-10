@@ -23,6 +23,7 @@ query
 
 By default, running `ingest-{doc,web}` creates a directory `faiss_index` that stores the embedding vector, and by default, `query` reads data from that directory.
 The `ingest-{doc,web}` can be run sequentially as it will append data to the `faiss_index`.
+Note that the `ingest-web` script uses user-agent `"ingest-web/0.1.0 (+https://github.com/aixnr/gordon)"`.
 
 Environmental variables:
 
@@ -32,6 +33,7 @@ Environmental variables:
 | `GORDON_MODEL_EMBEDDING` | `text-embedding-mxbai-embed-large-v1`
 | `GORDON_MODEL_ENDPOINT`  | `http://192.168.1.233:1234/v1` (LM Studio)
 | `GORDON_API_KEY`         | `dummy-key`
+| `GORDON_CRAWL_DEPTH`     | 0, pass this when running `ingest-web` to crawl links
 
 Tested with chat models `gpt-oss-20b` (from [Unsloth](https://huggingface.co/unsloth/gpt-oss-20b), quantized, `Q5_K_M` 10 GiB on disk, **11.3 GiB** VRAM) and `qwen3-14b` (quantized, `Q5_K_M` 9.8 GiB on disk, **10.4 GiB** VRAM).
 GPU was AMD Radeon RX 7090 XT 20 GiB VRAM on Arch linux.
