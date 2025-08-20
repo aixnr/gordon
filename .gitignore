@@ -6,3 +6,5 @@ venv/
 build/
 src/gordon.egg-info/
 *.json
+config.env
+

@@ -3,12 +3,20 @@ import requests
 from langchain_core.embeddings import Embeddings
 from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
+import pathlib
+from dotenv import load_dotenv
 
+load_dotenv(pathlib.Path.cwd() / "config.env", override=False)
 
 model_chat = os.getenv("GORDON_MODEL_CHAT", "gpt-oss-20b")
 model_embedding = os.getenv("GORDON_MODEL_EMBEDDING", "text-embedding-mxbai-embed-large-v1")
-api_endpoint = os.getenv("GORDON_MODEL_ENDPOINT", "http://192.168.1.233:1234/v1")
+api_endpoint = os.getenv("GORDON_MODEL_ENDPOINT", "http://127.0.0.1:1234/v1")
 api_key = os.getenv("GORDON_API_KEY", "dummy-key")
+
+# announce to user
+print(f"[*] API endpoint is {api_endpoint}")
+print(f"[*] Using {model_embedding} for the embedding...")
+print(f"[*] Using {model_chat} for the conversation...")
 
 
 class LocalOpenAIEmbeddings(Embeddings):

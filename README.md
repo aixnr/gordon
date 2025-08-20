@@ -25,13 +25,13 @@ By default, running `ingest-{doc,web}` creates a directory `faiss_index` that st
 The `ingest-{doc,web}` can be run sequentially as it will append data to the `faiss_index`.
 Note that the `ingest-web` script uses user-agent `"ingest-web/0.1.0 (+https://github.com/aixnr/gordon)"`.
 
-Environmental variables:
+Environmental variables (loaded from `config.env` by default; rename `config.example.env` to `config.env` after cloning this repo):
 
 | Key                      | Default value
 | :--                      | :--
 | `GORDON_MODEL_CHAT`      | `gpt-oss-20b`
 | `GORDON_MODEL_EMBEDDING` | `text-embedding-mxbai-embed-large-v1`
-| `GORDON_MODEL_ENDPOINT`  | `http://192.168.1.233:1234/v1` (LM Studio)
+| `GORDON_MODEL_ENDPOINT`  | `http://127.0.0.1:1234/v1` (LM Studio locally)
 | `GORDON_API_KEY`         | `dummy-key`
 | `GORDON_CRAWL_DEPTH`     | 0, pass this when running `ingest-web` to crawl links
 
@@ -67,4 +67,4 @@ Even though Gordon was merely a talking stone after his demise, he was essential
 
 License: MIT.
 
-LLMs that assisted with the coding: GPT-4.1 Mini (OpenRouter), GPT-5, and gpt-oss-20b.
+LLMs that assisted with the coding: GPT-4.1 Mini (OpenRouter), GPT-5, and gpt-oss-120b/20b.

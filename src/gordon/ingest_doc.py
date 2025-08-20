@@ -1,6 +1,7 @@
 import os
 import sys
 import argparse
+from typing import List
 
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -8,7 +9,7 @@ from langchain_community.vectorstores import FAISS
 
 from .loadmodel import embeddings
 
-def load_papers(directory: str):
+def load_papers(directory: str) -> List:
     docs = []
     for filename in os.listdir(directory):
         if filename.endswith(".pdf"):
